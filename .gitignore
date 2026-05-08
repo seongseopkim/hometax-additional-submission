@@ -1,0 +1,30 @@
+# Build artifacts
+dist/
+build_tmp/
+*.spec
+
+# Input data (sensitive personal info)
+input/
+
+# Processed / failed tracking folders
+processed/
+failed/
+failed_log.txt
+
+# Backup files
+RAP_jumin_list_backup.xlsx
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Test files
+테스트파일/
+
+# OS
+.DS_Store
+Thumbs.db
