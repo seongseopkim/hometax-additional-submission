@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import sys
 import os
 import io
@@ -7,9 +9,9 @@ from pathlib import Path
 
 # Windows cp949 환경에서 이모지 출력 시 인코딩 오류 방지
 if hasattr(sys.stdout, 'buffer'):
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
 if hasattr(sys.stderr, 'buffer'):
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace', line_buffering=True)
 
 def _patch_sys_path():
     if getattr(sys, 'frozen', False):
@@ -29,10 +31,13 @@ from PyQt5.QtGui import QFont
 
 from automation.login import login_and_save_session
 from automation.tasks import process_row, do_close_and_logout
-from utils.file_util import find_master_excel, read_master_excel, parse_rrn
+from utils.file_util import (
+    find_master_excel, read_master_excel,
+    find_pdf_for_row, write_bigo_to_excel,
+)
 
 if getattr(sys, 'frozen', False):
-    BASE_DIR = Path(sys.executable).parent   # exe가 실제로 놓인 폴더
+    BASE_DIR = Path(sys.executable).parent
 else:
     BASE_DIR = Path(__file__).parent
 
@@ -40,20 +45,16 @@ INPUT_DIR = BASE_DIR / "input"
 PDF_DIR   = BASE_DIR / "input" / "pdf"
 
 
-def _rename_folder_on_failure(pdf_dir: Path, folder: str, reason: str) -> None:
-    """실패 시 PDF 폴더명 끝에 실패 사유를 붙여 변경."""
-    try:
-        folder_path = pdf_dir / folder
-        if not folder_path.exists():
-            return
-        new_path = pdf_dir / f"{folder}_{reason}"
-        if new_path.exists():
-            print(f"[실패기록] ⚠️ 이미 존재하는 폴더명: {new_path.name}")
-            return
-        folder_path.rename(new_path)
-        print(f"[실패기록] ✅ 폴더명 변경: {folder} → {new_path.name}")
-    except Exception as e:
-        print(f"[실패기록] ❌ 폴더명 변경 실패: {e}")
+# ── 실패 사유 → 비고 텍스트 매핑 ─────────────────────────────────────────────
+
+def _reason_to_bigo(ok: bool, reason: str) -> str:
+    if ok:
+        return "완료"
+    if reason == "조회된_데이터_없음":
+        return "조회된 데이터 없음"
+    if reason == "제출내역존재":
+        return "제출내역존재"
+    return "첨부 실패"
 
 
 # ── 시그널 브릿지 ─────────────────────────────────────────────────────────────
@@ -162,7 +163,8 @@ class MainWindow(QMainWindow):
         self.nameList.addItem(f"📁 {excel_path.name}  —  총 {len(rows)}명")
         self.nameList.addItem("")
         for i, row in enumerate(rows, 1):
-            self.nameList.addItem(f"  {i}.  {row['이름']}  ({row['파일명']})")
+            pdf_stem = f"{row['이름']}_{row['유저번호1']}_{row['유저번호2']}"
+            self.nameList.addItem(f"  {i}.  {row['이름']}  ({pdf_stem}.pdf)")
 
     # ── 슬롯 ────────────────────────────────────────────────────────────────
     def _on_login_done(self, success: bool):
@@ -253,7 +255,8 @@ class MainWindow(QMainWindow):
                 return
 
             total = len(rows)
-            _log(f"📂 처리 대상: {total}명")
+            skip_count = sum(1 for r in rows if r.get("비고", ""))
+            _log(f"📂 처리 대상: {total}명 (비고 기록됨 {skip_count}명 건너뜀, 미처리 {total - skip_count}명)")
 
             navigate = True
 
@@ -262,12 +265,17 @@ class MainWindow(QMainWindow):
                     _log("⚠️ 사용자 중지 요청으로 종료")
                     break
 
-                name    = row["이름"]
-                rrn_raw = row["주민번호"]
-                folder  = row["폴더명"]
-                fname   = row["파일명"]
-                row_no  = row["행번호"]
-                label   = f"{name}({row_no}행)"
+                name      = row["이름"]
+                rrn_front = row["주민번호앞"]
+                rrn_back  = row["주민번호뒤"]
+                user_num1 = row["유저번호1"]
+                user_num2 = row["유저번호2"]
+                row_no    = row["행번호"]
+                label     = f"{name}({row_no}행)"
+
+                if row.get("비고", ""):
+                    _log(f"⏭️  [{i}/{total}] {label} — 비고 '{row['비고']}' 이미 있음, 건너뜀")
+                    continue
 
                 _log(f"📂 [{i}/{total}] {label}")
 
@@ -279,21 +287,25 @@ class MainWindow(QMainWindow):
                     self._sig.done.emit(False)
                     return
 
-                rrn_front, rrn_back = parse_rrn(rrn_raw)
-                if rrn_front is None:
-                    _log(f"⚠️ [{label}] 주민번호 형식 이상: {rrn_raw!r}")
-                    navigate = True
-                    _rename_folder_on_failure(PDF_DIR, folder, "주민번호_형식_이상")
-                    continue
-
-                pdf_path = PDF_DIR / folder / fname
-                if not pdf_path.exists():
-                    _log(f"⚠️ [{label}] PDF 없음: {pdf_path}")
+                # 주민번호 앞자리 검증
+                if len(rrn_front) != 6 or not rrn_front.isdigit():
+                    _log(f"⚠️ [{label}] 주민번호 앞자리 형식 이상: {rrn_front!r}")
+                    write_bigo_to_excel(excel_path, row_no, "첨부 실패")
                     navigate = True
                     continue
 
-                if pdf_path.suffix.lower() != ".pdf":
-                    _log(f"⚠️ [{label}] PDF 아님: {fname}")
+                # 주민번호 뒷자리 검증
+                if len(rrn_back) != 7 or not rrn_back.isdigit():
+                    _log(f"⚠️ [{label}] 주민번호 뒷자리 형식 이상: {rrn_back!r}")
+                    write_bigo_to_excel(excel_path, row_no, "첨부 실패")
+                    navigate = True
+                    continue
+
+                # PDF 파일 탐색 (pdf/ 폴더 flat 구조)
+                pdf_path = find_pdf_for_row(PDF_DIR, name, user_num1, user_num2)
+                if pdf_path is None:
+                    _log(f"⚠️ [{label}] PDF 없음: {name}_{user_num1}_{user_num2}.pdf")
+                    write_bigo_to_excel(excel_path, row_no, "PDF 없음")
                     navigate = True
                     continue
 
@@ -302,13 +314,19 @@ class MainWindow(QMainWindow):
                     name=name, status_cb=_log, navigate=navigate,
                     fixed_date=fixed_date,
                 )
+
+                bigo = _reason_to_bigo(ok, reason)
+                write_bigo_to_excel(excel_path, row_no, bigo)
+
                 if ok:
                     _log(f"✅ 완료: {label}")
                     navigate = False
+                elif reason in ("조회된_데이터_없음", "제출내역존재"):
+                    _log(f"❌ 실패: {label}  ({reason})")
+                    navigate = False  # 폼 그대로 — 주민번호만 재입력
                 else:
                     _log(f"❌ 실패: {label}  ({reason})")
                     navigate = True
-                    _rename_folder_on_failure(PDF_DIR, folder, reason)
 
                 time.sleep(1)
 

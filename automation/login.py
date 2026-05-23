@@ -269,6 +269,8 @@ def _close_unwanted_windows(driver: WebDriver, status: StatusCB):
 
     handles = driver.window_handles[:]
     for h in handles:
+        if h == main:  # 메인 창은 절대 닫지 않음
+            continue
         try:
             driver.switch_to.window(h)
             url = driver.current_url or ""
