@@ -8,8 +8,6 @@ query_popup  : 주민번호 조회 후 DOM팝업 텍스트만 캡처 (결과 txt
 import time
 from pathlib import Path
 
-import pyautogui
-import pyperclip
 
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -167,57 +165,26 @@ def _click_attach_and_switch(driver, _s) -> str:
     return main_handle
 
 
-def _click_file_btn_by_screen(driver, _s) -> bool:
-    """
-    파일선택 버튼(w2trigger)을 pyautogui로 OS 레벨 마우스 클릭.
-    JS click은 보안 정책상 파일 다이얼로그를 열지 못하므로 실제 클릭 좌표 계산.
-    """
-    try:
-        btn = WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, CSS_FILE_BTN))
-        )
 
-        # 브라우저 창 위치 (OS 스크린 좌표)
-        win_pos  = driver.get_window_position()
-        win_size = driver.get_window_size()
+CSS_GRID_FILE_NAME = '#mf_pf_UTECMGAA06_grdAddDocTery_cell_0_3 > nobr'
 
-        # 크롬 UI 높이 = 전체 창 높이 - 페이지 내부 높이
-        inner_h = driver.execute_script("return window.innerHeight")
-        chrome_h = win_size['height'] - inner_h
-
-        # 요소의 뷰포트 내 위치
-        rect = driver.execute_script(
-            "var r = arguments[0].getBoundingClientRect();"
-            "return {x: r.left, y: r.top, w: r.width, h: r.height};",
-            btn
-        )
-
-        screen_x = int(win_pos['x'] + rect['x'] + rect['w'] / 2)
-        screen_y = int(win_pos['y'] + chrome_h + rect['y'] + rect['h'] / 2)
-
-        _s(f"  파일선택 버튼 화면좌표: ({screen_x}, {screen_y})")
-        pyautogui.click(screen_x, screen_y)
-        _s("✅ 파일선택 버튼 OS 클릭 완료")
-        return True
-
-    except Exception as e:
-        _s(f"❌ 파일선택 버튼 OS 클릭 실패: {e}")
-        return False
-
-
-def _verify_file_selected(driver, _s, timeout: float = 10) -> bool:
-    """파일 선택 후 그리드 apndFleNm 컬럼에 파일명이 표시되는지 검증."""
+def _verify_file_selected(driver, _s, expected_name: str = "", timeout: float = 10) -> bool:
+    """파일 선택 후 그리드 첫 번째 행 파일명 셀이 채워졌는지 검증. expected_name 전달 시 일치 여부도 확인."""
     try:
         WebDriverWait(driver, timeout).until(
             lambda d: bool(d.execute_script(
-                "var cells = document.querySelectorAll('[data-col_id=\"apndFleNm\"]');"
-                "for(var i=0;i<cells.length;i++){"
-                "  if(cells[i].innerText.trim()) return true;"
-                "}"
-                "return false;"
+                f"var el = document.querySelector('{CSS_GRID_FILE_NAME}');"
+                "return el ? el.innerText.trim() : '';"
             ))
         )
-        _s("✅ 파일 선택 그리드 반영 확인")
+        actual = (driver.execute_script(
+            f"var el = document.querySelector('{CSS_GRID_FILE_NAME}');"
+            "return el ? el.innerText.trim() : '';"
+        ) or "").strip()
+        if expected_name and actual != expected_name:
+            _s(f"⚠️ 파일명 불일치: 그리드={actual!r}, 기대={expected_name!r}")
+            return False
+        _s(f"✅ 파일 선택 그리드 반영 확인: {actual!r}")
         return True
     except TimeoutException:
         _s("❌ 파일 선택 미확인 (그리드에 파일명 없음)")
@@ -247,37 +214,55 @@ def _close_popup_and_return(driver, main_handle: str, _s) -> None:
         _s(f"⚠️ 메인 창 복귀 실패: {e}")
 
 
+def _find_and_send_file(driver, abs_path: str) -> bool:
+    """
+    top-level 및 iframe 탐색하며 input[type="file"] 에 send_keys.
+    visibility 조작 없이 시도 → Chrome 보안 우회.
+    """
+    contexts = [None]  # None = default_content
+    try:
+        contexts += list(driver.find_elements(By.TAG_NAME, "iframe"))
+    except Exception:
+        pass
+
+    for ctx in contexts:
+        try:
+            if ctx is None:
+                driver.switch_to.default_content()
+            else:
+                driver.switch_to.default_content()
+                driver.switch_to.frame(ctx)
+
+            inputs = driver.find_elements(By.CSS_SELECTOR, CSS_FILE_INPUT)
+            if not inputs:
+                continue
+
+            inputs[0].send_keys(abs_path)
+            driver.switch_to.default_content()
+            return True
+        except Exception:
+            try:
+                driver.switch_to.default_content()
+            except Exception:
+                pass
+
+    return False
+
+
 def _upload_pdf(driver, _s, pdf_path: Path) -> bool:
     """
-    파일선택 버튼 OS 클릭 → 파일탐색기 경로 입력 → 그리드 반영 검증.
-    w2trigger는 JS click으로 파일 다이얼로그 불가 → pyautogui 스크린 클릭 사용.
+    input[type="file"]에 직접 경로 주입 → 그리드 반영 검증.
+    top-level 및 iframe 양쪽에서 탐색, visibility 조작 없이 send_keys.
     """
     _s(f"📁 파일 선택 시작: {pdf_path.name}")
     abs_path = str(pdf_path.resolve())
 
-    # 1. 파일선택 버튼 OS 레벨 클릭
-    if not _click_file_btn_by_screen(driver, _s):
+    if not _find_and_send_file(driver, abs_path):
+        _s("❌ 파일 입력 실패: input[type=file] 탐색 또는 send_keys 불가")
         return False
 
-    # 2. OS 파일탐색기 열릴 때까지 대기
-    time.sleep(2.5)
-
-    # 3. 파일명 입력창에 경로 붙여넣기 → 열기
-    try:
-        pyperclip.copy(abs_path)
-        pyautogui.hotkey('ctrl', 'a')
-        time.sleep(0.2)
-        pyautogui.hotkey('ctrl', 'v')
-        time.sleep(0.5)
-        pyautogui.press('enter')
-        _s(f"✅ 파일 경로 입력: {pdf_path.name}")
-        time.sleep(1.5)
-    except Exception as e:
-        _s(f"❌ 파일 경로 입력 실패: {e}")
-        return False
-
-    # 4. 그리드에 파일명 반영 검증
-    return _verify_file_selected(driver, _s, timeout=10)
+    _s(f"✅ 파일 경로 직접 입력: {pdf_path.name}")
+    return _verify_file_selected(driver, _s, expected_name=pdf_path.name, timeout=10)
 
 
 def _navigate_and_load(driver, _s) -> bool:
