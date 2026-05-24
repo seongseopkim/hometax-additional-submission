@@ -78,7 +78,6 @@ def _wm(driver, _s, note: str = "") -> str:
 def _do_search(driver, _s) -> tuple[str, bool]:
     _s("🔍 조회 버튼 클릭 중...")
     safe_click(driver, CSS_SEARCH_BTN, "조회")
-    _wm(driver, _s, "조회 후")
     time.sleep(1)
 
     _s("📋 팝업 대기 중...")
@@ -86,7 +85,7 @@ def _do_search(driver, _s) -> tuple[str, bool]:
     if popup_text:
         _s(f"📋 팝업: {popup_text!r}")
         if clicked:
-            _wm(driver, _s, "팝업 확인 후")
+            time.sleep(1)
     else:
         _s("⚠️ 팝업 미감지 (handle_dom_popup 결과 없음)")
     return popup_text, clicked
@@ -153,8 +152,7 @@ def _click_attach_and_switch(driver, _s) -> str:
         _s("⚠️ 페이지 로드 타임아웃 — 계속 진행")
 
     # 홈택스 로딩 모달 대기 (readyState 후에도 모달이 뒤늦게 뜰 수 있음)
-    time.sleep(1.0)
-    _wm(driver, _s, "새 창 로딩 모달")
+    time.sleep(1)
 
     # WebSquare 비동기 렌더링 대기 — 파일선택 버튼이 실제로 나타날 때까지 대기
     _s("⏳ WebSquare 초기화 대기 중 (파일선택 버튼 출현까지)...")
@@ -286,19 +284,19 @@ def _navigate_and_load(driver, _s) -> bool:
     """페이지 이동 → 버튼 클릭 → 입력 영역 대기. 실패 시 False 반환."""
     _s("🌐 신고 부속·증빙서류 제출 페이지 이동 중...")
     driver.get(SUBMIT_URL)
-    _wm(driver, _s, "페이지 이동")
+    time.sleep(1)
     time.sleep(2)
     accept_alert_if_any(driver)
 
     _s("🖱 [신고 부속·증빙서류 제출] 버튼 클릭 중...")
     safe_click(driver, "#mf_txppWframe_btnelc", "[신고 부속·증빙서류 제출]")
-    _wm(driver, _s, "버튼 클릭 후")
+    time.sleep(1)
     time.sleep(1)
 
     _s("🔎 입력 영역 대기 중...")
     try:
         _wait_present(driver, CSS_RRN_FRONT, timeout=15)
-        _wm(driver, _s, "페이지 로드 확인")
+        time.sleep(1)
         _s("✅ 페이지 로드 확인")
         return True
     except TimeoutException:
@@ -311,7 +309,7 @@ def _fill_date_and_rrn(driver, _s, rrn_front: str, rrn_back: str, fixed_date: st
     _s(f"📅 신고일자 입력: {fixed_date}")
     try:
         fill_input(driver, CSS_DATE_START, fixed_date, "신고일자")
-        _wm(driver, _s, "신고일자 입력 후")
+        time.sleep(1)
         time.sleep(0.3)
     except Exception as e:
         _s(f"⚠️ 신고일자 입력 실패 (무시): {e}")
@@ -319,13 +317,13 @@ def _fill_date_and_rrn(driver, _s, rrn_front: str, rrn_back: str, fixed_date: st
     # 주민번호 앞자리
     _s(f"✏️ 주민번호 앞자리 입력: {rrn_front}")
     fill_input(driver, CSS_RRN_FRONT, rrn_front, "주민번호 앞자리")
-    _wm(driver, _s, "앞자리 입력 후")
+    time.sleep(1)
     time.sleep(0.3)
 
     # 주민번호 뒷자리
     _s("✏️ 주민번호 뒷자리 입력")
     fill_input(driver, CSS_RRN_BACK, rrn_back, "주민번호 뒷자리")
-    _wm(driver, _s, "뒷자리 입력 후")
+    time.sleep(1)
     time.sleep(0.3)
 
     # JS 검증
@@ -385,7 +383,7 @@ def process_row(
         # 세목 선택
         _s("📋 세목 선택 중: 종합소득세")
         safe_select(driver, CSS_SEMOK_SEL, label="종합소득세", desc="세목")
-        _wm(driver, _s, "세목 선택 후")
+        time.sleep(1)
         time.sleep(0.3)
 
         # 조회 + 팝업 처리
@@ -396,7 +394,7 @@ def process_row(
         if "세목" in popup_text and "레이어팝업시작" not in popup_text:
             _s("⚠️ 세목 관련 팝업 감지 → 종합소득세 재선택 후 재조회")
             safe_select(driver, CSS_SEMOK_SEL, label="종합소득세", desc="세목 재선택")
-            _wm(driver, _s, "세목 재선택 후")
+            time.sleep(1)
             time.sleep(0.3)
             popup_text, clicked = _do_search(driver, _s)
 
@@ -469,7 +467,7 @@ def process_row(
             _s(f"✅ 제출 완료 alert 확인: {alert_text!r}")
         else:
             _s("⚠️ 40초 내 alert 미감지 — DOM 팝업 확인")
-            _wm(driver, _s, "제출 후")
+            time.sleep(1)
             popup_text, _ = handle_dom_popup(driver, timeout=5)
             if popup_text:
                 _s(f"📋 제출 후 팝업: {popup_text!r}")
@@ -603,7 +601,7 @@ def query_popup(
 
         # 세목 선택
         safe_select(driver, CSS_SEMOK_SEL, label="종합소득세", desc="세목")
-        _wm(driver, _s, "세목 선택 후")
+        time.sleep(1)
         time.sleep(0.3)
 
         # 조회 → 팝업 텍스트 그대로 반환
