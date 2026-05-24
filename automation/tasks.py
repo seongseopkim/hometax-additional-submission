@@ -79,9 +79,30 @@ def _do_search(driver, _s) -> tuple[str, bool]:
     time.sleep(1)
 
     _s("📋 팝업 대기 중...")
-    popup_text, clicked = handle_dom_popup(driver, timeout=10)
+    popup_text, clicked = handle_dom_popup(driver, timeout=2)
     if popup_text:
         _s(f"📋 팝업: {popup_text!r}")
+        if clicked:
+            time.sleep(1)
+        return popup_text, clicked
+
+    # 2초 내 팝업 미감지 → 로딩 모달 대기 후 재확인 → 그래도 없으면 버튼 재클릭
+    _s("⚠️ 팝업 미감지 → 로딩 대기 후 재확인")
+    _wm(driver, _s, "조회 후 로딩")
+    popup_text, clicked = handle_dom_popup(driver, timeout=5)
+    if popup_text:
+        _s(f"📋 팝업 (재확인): {popup_text!r}")
+        if clicked:
+            time.sleep(1)
+        return popup_text, clicked
+
+    _s("⚠️ 재확인도 미감지 → 조회 버튼 재클릭")
+    safe_click(driver, CSS_SEARCH_BTN, "조회 재클릭")
+    time.sleep(1)
+    _wm(driver, _s, "재클릭 후 로딩")
+    popup_text, clicked = handle_dom_popup(driver, timeout=10)
+    if popup_text:
+        _s(f"📋 팝업 (재클릭 후): {popup_text!r}")
         if clicked:
             time.sleep(1)
     else:
@@ -363,7 +384,11 @@ def process_row(
                     return False, "페이지_로드_실패"
 
         if not _fill_date_and_rrn(driver, _s, rrn_front, rrn_back, fixed_date):
-            return False, "주민번호_입력_실패"
+            _s("⚠️ 주민번호 입력 검증 실패 → URL 재진입 후 1회 재시도")
+            if not _navigate_and_load(driver, _s):
+                return False, "페이지_로드_실패"
+            if not _fill_date_and_rrn(driver, _s, rrn_front, rrn_back, fixed_date):
+                return False, "주민번호_입력_실패"
 
         # 세목 선택
         _s("📋 세목 선택 중: 종합소득세")
