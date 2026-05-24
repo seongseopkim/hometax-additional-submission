@@ -482,6 +482,46 @@ def _try_in_cert_iframe(driver: WebDriver, cert_name: str, cert_pw: str, status:
 
 
 # -----------------------------
+# 로그인 진입 방식별 헬퍼
+# -----------------------------
+def _do_cert_direct_entry(driver: WebDriver, status: StatusCB):
+    """공동·금융인증서 탭 → 버튼 클릭 → 인증서 팝업 대기."""
+    status("🔎 공동·금융인증서 탭 탐색")
+    found = _switch_to_frame_containing(driver, "#mf_txppWframe_anchor13", timeout_each=5)
+    if not found:
+        raise TimeoutException("공동·금융인증서 탭(#mf_txppWframe_anchor13)을 찾지 못했습니다.")
+    _safe_click(driver, "#mf_txppWframe_anchor13", timeout=15, retries=5, status=status)
+    random_delay(1.2, 2.0)
+
+    status("🖱 공동·금융인증서 버튼 클릭")
+    found = _switch_to_frame_containing(driver, "#mf_txppWframe_anchor22", timeout_each=5)
+    if not found:
+        raise TimeoutException("공동·금융인증서 버튼(#mf_txppWframe_anchor22)을 찾지 못했습니다.")
+    _safe_click(driver, "#mf_txppWframe_anchor22", timeout=15, retries=5, status=status)
+    random_delay(2.0, 3.0)
+    driver.switch_to.default_content()
+
+
+def _do_idpw_entry(driver: WebDriver, user_id: str, user_pw: str, status: StatusCB):
+    """아이디 로그인 탭 → ID/PW 입력 → 로그인 클릭 → 인증서 팝업 대기."""
+    status("🔎 아이디 로그인 탭 탐색")
+    found = _switch_to_frame_containing(driver, "#mf_txppWframe_anchor15", timeout_each=5)
+    if not found:
+        raise TimeoutException("아이디 로그인 탭(#mf_txppWframe_anchor15)을 찾지 못했습니다.")
+    _safe_click(driver, "#mf_txppWframe_anchor15", timeout=15, retries=5, status=status)
+    random_delay(0.8, 1.5)
+
+    status("✏️ 아이디/비밀번호 입력")
+    _safe_fill(driver, "#mf_txppWframe_iptUserId", user_id, timeout=10, retries=4, status=status)
+    _safe_fill(driver, "#mf_txppWframe_iptUserPw", user_pw, timeout=10, retries=4, status=status)
+
+    status("🖱 로그인 버튼 클릭")
+    _safe_click(driver, "#mf_txppWframe_anchor25", timeout=15, retries=5, status=status)
+    random_delay(3.0, 5.0)
+    driver.switch_to.default_content()
+
+
+# -----------------------------
 # 메인 로그인 함수
 # -----------------------------
 def login_and_save_session(
@@ -490,11 +530,15 @@ def login_and_save_session(
     cert_name: str,
     cert_pw: str,
     status_callback: StatusCB = print,
+    login_method: str = "cert",  # "cert" | "idpw"
 ):
     """
     반환: (browser, context, page) Playwright 호환 형태
     - browser == page == Selenium WebDriver
     - context == None
+    login_method:
+      "cert"  — 공동·금융인증서 직접 로그인 (기존 방식)
+      "idpw"  — 아이디+비밀번호 → 인증서 로그인 (홈택스 일반 로그인)
     """
     driver: Optional[WebDriver] = None
 
@@ -533,37 +577,13 @@ def login_and_save_session(
         )
         random_delay(1.0, 2.0)
 
-        # 공동·금융인증서 탭 선택
-        status_callback("🔎 공동·금융인증서 탭 탐색")
-        found_cert_tab = _switch_to_frame_containing(driver, "#mf_txppWframe_anchor13", timeout_each=5)
-        if not found_cert_tab:
-            raise TimeoutException("공동·금융인증서 탭(#mf_txppWframe_anchor13)을 찾지 못했습니다.")
-
-        _safe_click(
-            driver,
-            "#mf_txppWframe_anchor13",
-            timeout=15,
-            retries=5,
-            status=status_callback,
-        )
-        random_delay(1.2, 2.0)
-
-        # 공동·금융인증서 버튼 클릭
-        status_callback("🖱 공동·금융인증서 버튼 클릭")
-        found_cert_btn = _switch_to_frame_containing(driver, "#mf_txppWframe_anchor22", timeout_each=5)
-        if not found_cert_btn:
-            raise TimeoutException("공동·금융인증서 버튼(#mf_txppWframe_anchor22)을 찾지 못했습니다.")
-
-        _safe_click(
-            driver,
-            "#mf_txppWframe_anchor22",
-            timeout=15,
-            retries=5,
-            status=status_callback,
-        )
-        random_delay(2.0, 3.0)
-
-        driver.switch_to.default_content()
+        # 로그인 방식에 따라 분기
+        if login_method == "idpw":
+            status_callback("🪪 로그인 방식: 아이디+인증서")
+            _do_idpw_entry(driver, user_id, user_pw, status_callback)
+        else:
+            status_callback("🔑 로그인 방식: 공인인증서 직접")
+            _do_cert_direct_entry(driver, status_callback)
 
         # 팝업/빈창/알럿 정리
         _close_unwanted_windows(driver, status_callback)

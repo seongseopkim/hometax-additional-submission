@@ -24,7 +24,7 @@ _patch_sys_path()
 
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLineEdit, QPushButton, QListWidget
+    QLineEdit, QPushButton, QListWidget, QRadioButton, QButtonGroup
 )
 from PyQt5.QtCore import pyqtSignal, QObject
 from PyQt5.QtGui import QFont
@@ -86,6 +86,19 @@ class MainWindow(QMainWindow):
 
         # ── 왼쪽 영역 ────────────────────────────────────────────────────────
         leftLayout = QVBoxLayout()
+
+        # 로그인 방식 선택
+        methodLayout = QHBoxLayout()
+        self.radio_cert = QRadioButton("공인인증서 로그인")
+        self.radio_idpw = QRadioButton("아이디+인증서 로그인")
+        self.radio_cert.setChecked(True)
+        self._login_method_group = QButtonGroup()
+        self._login_method_group.addButton(self.radio_cert)
+        self._login_method_group.addButton(self.radio_idpw)
+        methodLayout.addWidget(self.radio_cert)
+        methodLayout.addWidget(self.radio_idpw)
+        methodLayout.addStretch()
+        leftLayout.addLayout(methodLayout)
 
         loginLayout = QHBoxLayout()
 
@@ -207,13 +220,15 @@ class MainWindow(QMainWindow):
             self._driver = None
 
         try:
-            _log("🚀 브라우저 시작 및 로그인 중...")
+            method = "idpw" if self.radio_idpw.isChecked() else "cert"
+            _log(f"🚀 브라우저 시작 및 로그인 중... (방식: {'아이디+인증서' if method == 'idpw' else '공인인증서'})")
             _, _, driver = login_and_save_session(
-                user_id   = self.id_input.text().strip(),
-                user_pw   = self.pw_input.text().strip(),
-                cert_name = self.cert_input.text().strip(),
-                cert_pw   = self.cpw_input.text().strip(),
-                status_callback=_log,
+                user_id      = self.id_input.text().strip(),
+                user_pw      = self.pw_input.text().strip(),
+                cert_name    = self.cert_input.text().strip(),
+                cert_pw      = self.cpw_input.text().strip(),
+                status_callback = _log,
+                login_method    = method,
             )
             self._driver = driver
             _log("✅ 로그인 완료 — 이제 [추가서류 제출] 버튼을 눌러주세요")
